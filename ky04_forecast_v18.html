@@ -360,60 +360,58 @@ const POLL_AVG_G = POLLS.reduce((s, p) => s + p.gallrein, 0) / POLLS.length;
 const POLL_AVG_M_DECIDED = POLL_AVG_M / (POLL_AVG_M + POLL_AVG_G) * 100;
 
 // Hometown regional gradients. Each candidate's pp boost is multiplied by their
-// county weight, which decays smoothly with distance from their home county.
-// Every county feels SOME pull (10% floor at the far edge of the district).
+// county weight, which is concentrated on their side of the district.
+// Counties on the opposite side get 0 — so when both sliders are equal,
+// the net hometown effect splits the map east (Massie) vs west (Gallrein)
+// instead of leaking across the whole district.
 //
-// Massie home: Lewis County (Garrison, KY — far east). Strongest in Appalachian
-// counties, weakest along the Louisville-side. Even Oldham (180 km away) gets ~10%.
-// Gallrein home: Henry County (proxy for his Shelbyville farm just outside KY-04).
-// Strongest in Louisville-side counties, weakest in the eastern Appalachian counties.
-// Distances (km) computed from county centroids; diameter of district = 220.5 km.
+// Massie home: Lewis County (Garrison, KY — far east). Pull concentrated in
+// the Appalachian cluster; zero in every Louisville-side county.
+// Gallrein home: Henry County (proxy for his Shelbyville farm just outside
+// KY-04). Pull concentrated in the Louisville-side cluster; zero in every
+// eastern Appalachian county.
 const MASSIE_HOME = 'Lewis';
 const GALLREIN_HOME = 'Henry';
-const DIST_FROM_MASSIE = {
-  Boone: 126.86,
-  Bracken: 64.43,
-  Campbell: 98.51,
-  Carroll: 152.35,
-  Fleming: 33.20,
-  Gallatin: 131.19,
-  Grant: 109.10,
-  Greenup: 39.60,
-  Harrison: 83.64,
-  Henry: 152.16,
-  Kenton: 110.04,
-  Lewis: 0.00,
-  Mason: 39.40,
-  Oldham: 180.93,
-  Owen: 126.18,
-  Pendleton: 87.43,
-  Robertson: 58.53,
-  Trimble: 170.51
-};
-const DIST_FROM_GALLREIN = {
-  Boone: 67.12,
-  Bracken: 93.49,
-  Campbell: 84.66,
-  Carroll: 24.17,
-  Fleming: 124.49,
-  Gallatin: 41.13,
-  Grant: 48.67,
-  Greenup: 191.75,
-  Harrison: 68.91,
+const MASSIE_REGION_WEIGHTS = {
+  Lewis: 1.00,
+  Greenup: 0.70,
+  Fleming: 0.70,
+  Mason: 0.70,
+  Robertson: 0.65,
+  Bracken: 0.55,
+  Harrison: 0.35,
+  Pendleton: 0.15,
+  Campbell: 0.05,
+  Grant: 0.05,
+  Kenton: 0.00,
+  Boone: 0.00,
+  Owen: 0.00,
   Henry: 0.00,
-  Kenton: 74.34,
-  Lewis: 152.16,
-  Mason: 114.17,
-  Oldham: 28.94,
-  Owen: 26.79,
-  Pendleton: 71.60,
-  Robertson: 93.66,
-  Trimble: 26.01
+  Gallatin: 0.00,
+  Carroll: 0.00,
+  Trimble: 0.00,
+  Oldham: 0.00
 };
-const DISTRICT_DIAMETER = 220.51;
-// Linear decay with 10% floor: home → 1.0, far edge → 0.10. Every county feels something.
-const MASSIE_REGION_WEIGHTS = Object.fromEntries(Object.entries(DIST_FROM_MASSIE).map(([n, d]) => [n, Math.max(0.10, 1 - d / DISTRICT_DIAMETER)]));
-const GALLREIN_REGION_WEIGHTS = Object.fromEntries(Object.entries(DIST_FROM_GALLREIN).map(([n, d]) => [n, Math.max(0.10, 1 - d / DISTRICT_DIAMETER)]));
+const GALLREIN_REGION_WEIGHTS = {
+  Henry: 1.00,
+  Oldham: 0.70,
+  Trimble: 0.70,
+  Carroll: 0.65,
+  Owen: 0.50,
+  Gallatin: 0.45,
+  Boone: 0.25,
+  Grant: 0.15,
+  Kenton: 0.15,
+  Campbell: 0.05,
+  Pendleton: 0.05,
+  Harrison: 0.05,
+  Bracken: 0.00,
+  Robertson: 0.00,
+  Mason: 0.00,
+  Fleming: 0.00,
+  Lewis: 0.00,
+  Greenup: 0.00
+};
 // Pop-weighted average regional weight (used for district aggregate shift).
 const MASSIE_REGIONAL_AVG = Object.entries(COUNTY_DATA).reduce((a, [n, c]) => a + c.pop * (MASSIE_REGION_WEIGHTS[n] || 0), 0) / Object.values(COUNTY_DATA).reduce((s, c) => s + c.pop, 0);
 const GALLREIN_REGIONAL_AVG = Object.entries(COUNTY_DATA).reduce((a, [n, c]) => a + c.pop * (GALLREIN_REGION_WEIGHTS[n] || 0), 0) / Object.values(COUNTY_DATA).reduce((s, c) => s + c.pop, 0);
@@ -917,7 +915,7 @@ function KY04Forecast() {
     defaultOpen: false
   }, /*#__PURE__*/React.createElement("div", {
     className: "card-sub"
-  }, "Regional gradient \u2014 strongest in each candidate's home county, fades with distance. Massie's pull peaks in Lewis Co. (east) and rolls off across the Appalachian cluster. Gallrein peaks in Henry Co. (proxy for his Shelby farm) and rolls off across the Louisville-side counties."), /*#__PURE__*/React.createElement(SliderRow, {
+  }, "East vs. west pull \u2014 each candidate's boost concentrates on their side of the district and is zero on the other side. Massie peaks in Lewis Co. (east) and rolls off across the Appalachian cluster. Gallrein peaks in Henry Co. (proxy for his Shelby farm) and rolls off across the Louisville-side counties. At equal slider values the map splits cleanly east/west rather than tilting wholesale toward either candidate."), /*#__PURE__*/React.createElement(SliderRow, {
     label: "Massie hometown boost",
     hint: "Full at Lewis (1.0). Greenup/Fleming/Mason 0.70 \xB7 Robertson 0.65 \xB7 Bracken 0.55 \xB7 Harrison 0.35 \xB7 Pendleton 0.15 \xB7 Campbell/Grant 0.05 \xB7 everything west 0.",
     value: massieHometown,
