@@ -1265,11 +1265,30 @@ function KY04Map({
       const dir = c.pct >= 50 ? 'Massie' : 'Gallrein';
       return `${d.properties.name} County\n` + `Pop (2023): ${c.pop.toLocaleString()}\n` + `Projected turnout: ${c.voters.toLocaleString()}\n` + `Massie: ${c.pct.toFixed(1)}% (${c.massieVotes.toLocaleString()})\n` + `Gallrein: ${(100 - c.pct).toFixed(1)}% (${c.gallreinVotes.toLocaleString()})\n` + `Margin: ${dir} +${Math.abs(margin)}`;
     });
-    svg.selectAll('text.label').data(geojson.features).enter().append('text').attr('class', 'label').attr('x', d => path.centroid(d)[0]).attr('y', d => path.centroid(d)[1] - 2).attr('text-anchor', 'middle').attr('font-size', d => COUNTY_DATA[d.properties.name] && COUNTY_DATA[d.properties.name].pop > 60000 ? 13 : 10).attr('font-weight', 700).attr('fill', '#ffffff').attr('pointer-events', 'none').text(d => d.properties.name);
-    svg.selectAll('text.pct').data(geojson.features).enter().append('text').attr('class', 'pct').attr('x', d => path.centroid(d)[0]).attr('y', d => path.centroid(d)[1] + 11).attr('text-anchor', 'middle').attr('font-size', 11).attr('font-weight', 600).attr('fill', '#ffffff').attr('pointer-events', 'none').text(d => {
-      const c = counties[d.properties.name];
-      return c !== undefined ? `${c.pct.toFixed(0)}` : '';
+    const labelInfo = geojson.features.map(d => {
+      const cd = COUNTY_DATA[d.properties.name];
+      const [cx, cy] = path.centroid(d);
+      const b = path.bounds(d);
+      return { name: d.properties.name, pop: cd ? cd.pop : 0, cx, cy, countyW: b[1][0] - b[0][0] };
     });
+    labelInfo.sort((a, b) => b.pop - a.pop);
+    const placed = [];
+    labelInfo.forEach(f => {
+      let fontSize = f.pop > 60000 ? 13 : f.pop > 20000 ? 11 : 10;
+      const measure = sz => f.name.length * sz * 0.55;
+      while (fontSize > 8 && measure(fontSize) > f.countyW * 0.85) fontSize--;
+      const w = measure(fontSize);
+      const h = fontSize;
+      const hit = placed.some(p => Math.abs(p.cx - f.cx) < (p.w + w) / 2 + 3 && Math.abs(p.cy - f.cy) < (p.h + h) / 2 + 3);
+      if (!hit) {
+        f.show = true;
+        f.fontSize = fontSize;
+        f.w = w;
+        f.h = h;
+        placed.push(f);
+      }
+    });
+    svg.selectAll('text.label').data(labelInfo.filter(f => f.show)).enter().append('text').attr('class', 'label').attr('x', d => d.cx).attr('y', d => d.cy).attr('text-anchor', 'middle').attr('dominant-baseline', 'middle').attr('font-size', d => d.fontSize).attr('font-weight', 600).attr('fill', '#ffffff').attr('pointer-events', 'none').text(d => d.name);
   }, [counties]);
   return /*#__PURE__*/React.createElement("svg", {
     ref: ref,
