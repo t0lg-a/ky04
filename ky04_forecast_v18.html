@@ -83,6 +83,15 @@
   .map-card-head { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; }
   .map-tag { font-size: 11px; font-weight: 700; color: #1a1a1a; background: #fafafa; border: 1px solid #e5e5e5; padding: 4px 10px; border-radius: 8px; text-transform: uppercase; letter-spacing: 0.06em; }
   .map-svg { display: block; width: 100%; }
+  .map-wrap { position: relative; }
+  .map-tooltip { position: absolute; pointer-events: none; opacity: 0; transition: opacity 140ms ease; background: #ffffff; border: 1px solid #dcdce7; border-radius: 10px; box-shadow: 0 22px 48px rgba(53, 28, 113, 0.16); padding: 0.65rem 0.85rem; min-width: 180px; z-index: 5; }
+  .map-tooltip.is-visible { opacity: 1; }
+  .map-tooltip-title { font-size: 13px; font-weight: 600; color: #1a1a1a; margin-bottom: 6px; letter-spacing: -0.01em; }
+  .map-tooltip-row { display: flex; justify-content: space-between; gap: 14px; font-size: 12px; color: #4a4a4a; line-height: 1.5; font-variant-numeric: tabular-nums; }
+  .map-tooltip-row .mt-label { color: #737373; }
+  .map-tooltip-row .mt-massie { color: #a16207; font-weight: 600; }
+  .map-tooltip-row .mt-gallrein { color: #dc2626; font-weight: 600; }
+  .map-tooltip-divider { height: 1px; background: #ecebf7; margin: 6px 0; }
   .map-fallback { padding: 100px; text-align: center; color: var(--text-muted); font-size: 14px; }
   .map-legend { display: flex; align-items: center; gap: 10px; margin-top: 14px; }
   .leg-label { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; }
@@ -548,13 +557,9 @@ function project(s) {
   const structural = (massieFromAge + massieFromAlign) / 2;
 
   // Polls force: ONLY affected by pollingWeight slider.
-  // Polls show Massie at 50.30 of decided — barely ahead. To make this signal MEANINGFUL,
-  // we amplify the lean by POLLS_AMPLIFIER so that "polls trust" actually shifts the
-  // projection by several pp, not fractions of one. At pw=100 polls push baseline to ~56.
-  // pw=0  → baseline = 50  (no polls anchor, neutral coin flip)
-  // pw=100 → baseline ≈ 56 (full polls trust, Massie's slight lead amplified)
-  const POLLS_AMPLIFIER = 20;
-  const baseline = 50 + (POLL_AVG_M_DECIDED - 50) * (s.pollingWeight / 100) * POLLS_AMPLIFIER;
+  // pw=0   → baseline = 50                    (no polls anchor, neutral coin flip)
+  // pw=100 → baseline = POLL_AVG_M_DECIDED ≈ 50.30 (full polls trust, Massie's narrow lead)
+  const baseline = 50 + (POLL_AVG_M_DECIDED - 50) * (s.pollingWeight / 100);
 
   // Demographic force: ALWAYS at full strength, COMPLETELY independent of pollingWeight.
   // Moving age or alignment sliders changes this by the same amount regardless of pw.
@@ -1245,6 +1250,8 @@ function KY04Map({
   counties
 }) {
   const ref = useRef(null);
+  const wrapRef = useRef(null);
+  const tipRef = useRef(null);
   useEffect(() => {
     if (!ref.current || !window.KY04_GEOJSON) return;
     const svg = d3.select(ref.current);
@@ -1255,16 +1262,48 @@ function KY04Map({
     const geojson = window.KY04_GEOJSON;
     const projection = d3.geoIdentity().reflectY(true).fitExtent([[16, 16], [W - 16, H - 16]], geojson);
     const path = d3.geoPath(projection);
+    const tip = tipRef.current;
+    const wrap = wrapRef.current;
+    const showTip = (event, d) => {
+      if (!tip || !wrap) return;
+      const c = counties[d.properties.name];
+      if (!c) {
+        tip.innerHTML = `<div class="map-tooltip-title">${d.properties.name} County</div>`;
+      } else {
+        const margin = (2 * c.pct - 100).toFixed(1);
+        const dir = c.pct >= 50 ? 'Massie' : 'Gallrein';
+        const cls = c.pct >= 50 ? 'mt-massie' : 'mt-gallrein';
+        tip.innerHTML =
+          `<div class="map-tooltip-title">${d.properties.name} County</div>` +
+          `<div class="map-tooltip-row"><span class="mt-label">Population (2023)</span><span>${c.pop.toLocaleString()}</span></div>` +
+          `<div class="map-tooltip-row"><span class="mt-label">Projected turnout</span><span>${c.voters.toLocaleString()}</span></div>` +
+          `<div class="map-tooltip-divider"></div>` +
+          `<div class="map-tooltip-row"><span class="mt-massie">Massie</span><span>${c.pct.toFixed(1)}% · ${c.massieVotes.toLocaleString()}</span></div>` +
+          `<div class="map-tooltip-row"><span class="mt-gallrein">Gallrein</span><span>${(100 - c.pct).toFixed(1)}% · ${c.gallreinVotes.toLocaleString()}</span></div>` +
+          `<div class="map-tooltip-divider"></div>` +
+          `<div class="map-tooltip-row"><span class="mt-label">Margin</span><span class="${cls}">${dir} +${Math.abs(margin)}</span></div>`;
+      }
+      tip.classList.add('is-visible');
+      moveTip(event);
+    };
+    const moveTip = event => {
+      if (!tip || !wrap) return;
+      const rect = wrap.getBoundingClientRect();
+      const tw = tip.offsetWidth;
+      const th = tip.offsetHeight;
+      let x = event.clientX - rect.left + 14;
+      let y = event.clientY - rect.top + 14;
+      if (x + tw > rect.width - 4) x = event.clientX - rect.left - tw - 14;
+      if (y + th > rect.height - 4) y = event.clientY - rect.top - th - 14;
+      tip.style.transform = `translate(${Math.max(4, x)}px, ${Math.max(4, y)}px)`;
+    };
+    const hideTip = () => {
+      if (tip) tip.classList.remove('is-visible');
+    };
     svg.selectAll('path').data(geojson.features).enter().append('path').attr('d', path).attr('fill', d => {
       const c = counties[d.properties.name];
       return c !== undefined ? scaleMassie(c.pct) : '#e5e5e5';
-    }).attr('stroke', '#ffffff').attr('stroke-width', 1.2).style('vector-effect', 'non-scaling-stroke').append('title').text(d => {
-      const c = counties[d.properties.name];
-      if (!c) return d.properties.name;
-      const margin = (2 * c.pct - 100).toFixed(1);
-      const dir = c.pct >= 50 ? 'Massie' : 'Gallrein';
-      return `${d.properties.name} County\n` + `Pop (2023): ${c.pop.toLocaleString()}\n` + `Projected turnout: ${c.voters.toLocaleString()}\n` + `Massie: ${c.pct.toFixed(1)}% (${c.massieVotes.toLocaleString()})\n` + `Gallrein: ${(100 - c.pct).toFixed(1)}% (${c.gallreinVotes.toLocaleString()})\n` + `Margin: ${dir} +${Math.abs(margin)}`;
-    });
+    }).attr('stroke', '#ffffff').attr('stroke-width', 1.2).style('vector-effect', 'non-scaling-stroke').style('cursor', 'pointer').on('mouseenter', showTip).on('mousemove', moveTip).on('mouseleave', hideTip);
     const labelInfo = geojson.features.map(d => {
       const cd = COUNTY_DATA[d.properties.name];
       const [cx, cy] = path.centroid(d);
@@ -1290,10 +1329,16 @@ function KY04Map({
     });
     svg.selectAll('text.label').data(labelInfo.filter(f => f.show)).enter().append('text').attr('class', 'label').attr('x', d => d.cx).attr('y', d => d.cy).attr('text-anchor', 'middle').attr('dominant-baseline', 'middle').attr('font-size', d => d.fontSize).attr('font-weight', 600).attr('fill', '#ffffff').attr('pointer-events', 'none').text(d => d.name);
   }, [counties]);
-  return /*#__PURE__*/React.createElement("svg", {
+  return /*#__PURE__*/React.createElement("div", {
+    ref: wrapRef,
+    className: "map-wrap"
+  }, /*#__PURE__*/React.createElement("svg", {
     ref: ref,
     className: "map-svg"
-  });
+  }), /*#__PURE__*/React.createElement("div", {
+    ref: tipRef,
+    className: "map-tooltip"
+  }));
 }
 function scaleMassie(pct) {
   if (pct >= 85) return '#a16207'; // yellow-700
