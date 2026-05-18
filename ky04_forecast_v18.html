@@ -84,7 +84,7 @@
   .map-tag { font-size: 11px; font-weight: 700; color: #1a1a1a; background: #fafafa; border: 1px solid #e5e5e5; padding: 4px 10px; border-radius: 8px; text-transform: uppercase; letter-spacing: 0.06em; }
   .map-svg { display: block; width: 100%; }
   .map-wrap { position: relative; }
-  .map-tooltip { position: absolute; pointer-events: none; opacity: 0; transition: opacity 140ms ease; background: #ffffff; border: 1px solid #dcdce7; border-radius: 10px; box-shadow: 0 22px 48px rgba(53, 28, 113, 0.16); padding: 0.65rem 0.85rem; min-width: 180px; z-index: 5; }
+  .map-tooltip { position: absolute; top: 0; left: 0; pointer-events: none; opacity: 0; transition: opacity 140ms ease; background: #ffffff; border: 1px solid #dcdce7; border-radius: 10px; box-shadow: 0 22px 48px rgba(53, 28, 113, 0.16); padding: 0.65rem 0.85rem; min-width: 180px; z-index: 5; }
   .map-tooltip.is-visible { opacity: 1; }
   .map-tooltip-title { font-size: 13px; font-weight: 600; color: #1a1a1a; margin-bottom: 6px; letter-spacing: -0.01em; }
   .map-tooltip-row { display: flex; justify-content: space-between; gap: 14px; font-size: 12px; color: #4a4a4a; line-height: 1.5; font-variant-numeric: tabular-nums; }
@@ -554,14 +554,19 @@ function project(s) {
   const massieFromAlign = ALIGN_BUCKETS.reduce((acc, b) => acc + ALIGN_COMP[b.id] * s.alignSupport[b.id], 0);
   const structural = (massieFromAge + massieFromAlign) / 2;
 
-  // Polls force: ONLY affected by pollingWeight slider.
-  // pw=0   → baseline = 50                    (no polls anchor, neutral coin flip)
-  // pw=100 → baseline = POLL_AVG_M_DECIDED ≈ 50.30 (full polls trust, Massie's narrow lead)
-  const baseline = 50 + (POLL_AVG_M_DECIDED - 50) * (s.pollingWeight / 100);
+  // Polls anchor: at pw=100 the projection is fully anchored to the polling
+  // average; at pw=0 the polls don't influence the projection at all and the
+  // result is determined entirely by structural / historical / hometown /
+  // campaign forces. Non-poll shifts are scaled by (1 - pw/100), so cranking
+  // the slider drags the result toward the polling number.
+  const pw = s.pollingWeight / 100;
+  const pollScale = 1 - pw;
+  // Baseline shown in the contribution panel: lerps 50 (neutral) → POLL_AVG_M_DECIDED.
+  const baseline = 50 + (POLL_AVG_M_DECIDED - 50) * pw;
 
-  // Demographic force: ALWAYS at full strength, COMPLETELY independent of pollingWeight.
-  // Moving age or alignment sliders changes this by the same amount regardless of pw.
-  const structuralShift = structural - 50;
+  // Demographic force: scaled by (1 - pw/100). At full polls trust the demographic
+  // sliders are silenced; the polls already capture this signal.
+  const structuralShift = (structural - 50) * pollScale;
 
   // Historical baselines: w24/w23 control HOW each county deviates from the district average.
   // They are NOT a force on the district aggregate — by construction, county leans average to
@@ -573,18 +578,17 @@ function project(s) {
   const historicalShift = 0;
 
   // Hometown force: regional gradient — each candidate has a per-county weight that
-  // falls off with distance from home. Aggregate effect is pop-weighted.
+  // falls off with distance from home. Aggregate effect is pop-weighted. Also
+  // scaled by (1 - pw/100) so the polls anchor properly at pw=100.
   const mh = s.massieHometown || 0;
   const gh = s.gallreinHometown || 0;
-  const hometownShift = mh * MASSIE_REGIONAL_AVG - gh * GALLREIN_REGIONAL_AVG;
+  const hometownShift = (mh * MASSIE_REGIONAL_AVG - gh * GALLREIN_REGIONAL_AVG) * pollScale;
 
-  // Campaign levers — additive, always apply
+  // Campaign levers — scaled by (1 - pw/100) like every other non-poll force.
   const tSum = s.trumpShares.pro + s.trumpShares.none + s.trumpShares.anti || 1;
-  // Trump endorsement: scaled DOWN so it doesn't dominate (was 0.25, now 0.10).
-  // Default trump shares give ~0.7 pp shift; extreme partisan splits give ±10 pp.
-  const trumpShift = (s.trumpShares.anti - s.trumpShares.pro) / tSum * 100 * 0.10;
-  const spendingShift = -(s.spendingWeight - 50) * 0.14;
-  const smallDonorShift = (s.smallDonorIntensity - 50) * 0.12;
+  const trumpShift = (s.trumpShares.anti - s.trumpShares.pro) / tSum * 100 * 0.10 * pollScale;
+  const spendingShift = -(s.spendingWeight - 50) * 0.14 * pollScale;
+  const smallDonorShift = (s.smallDonorIntensity - 50) * 0.12 * pollScale;
 
   // District-wide Massie share (top-down projection)
   const districtRaw = baseline + structuralShift + historicalShift + hometownShift + trumpShift + spendingShift + smallDonorShift;
@@ -598,8 +602,9 @@ function project(s) {
   for (const [name, c] of Object.entries(COUNTY_DATA)) {
     const lean24 = c.massie24 - DIST_M24;
     const lean23 = c.cameron23 - DIST_C23;
-    // Hometown boost via regional gradient (full at home, fades with distance)
-    const homeBoost = mh * (MASSIE_REGION_WEIGHTS[name] || 0) - gh * (GALLREIN_REGION_WEIGHTS[name] || 0);
+    // Hometown boost via regional gradient (full at home, fades with distance).
+    // Scaled by pollScale to match the aggregate hometownShift above.
+    const homeBoost = (mh * (MASSIE_REGION_WEIGHTS[name] || 0) - gh * (GALLREIN_REGION_WEIGHTS[name] || 0)) * pollScale;
     // The district aggregate already includes the pop-weighted average,
     // so subtract that to get the LOCAL deviation from the district-wide shift.
     const localHomeDeviation = homeBoost - hometownShift;
@@ -871,7 +876,7 @@ function KY04Forecast() {
     className: "card-sub"
   }, "How much to anchor the projection to the polling average."), /*#__PURE__*/React.createElement(SliderRow, {
     label: "Polling weight",
-    hint: "How much polls anchor the baseline. 0 = ignore polls (assume 50/50). 100 = full polls trust. Has no effect on demographic sliders.",
+    hint: `How much the polls anchor the projection. 0 = ignore polls (result driven entirely by demographics, hometown and campaign sliders). 100 = full polls trust — projection anchors to the polling average (~${POLL_AVG_M_DECIDED.toFixed(1)}% Massie) and other sliders are silenced.`,
     value: pollingWeight,
     onChange: setPollingWeight,
     max: 100,
